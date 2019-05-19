@@ -104,7 +104,7 @@ async function _export({
 			if (pathname !== '/service-worker-index.html') {
 				file = file === '' ? 'index.html' : `${file}/index.html`;
 			}
-			body = minify_html(body);
+			body = body;
 		}
 
 		onfile({
