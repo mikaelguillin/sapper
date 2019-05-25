@@ -7,6 +7,7 @@ import * as yootils from 'yootils';
 import * as ports from 'port-authority';
 import clean_html from './utils/clean_html';
 import minify_html from './utils/minify_html';
+import prettier from 'prettier';
 import Deferred from './utils/Deferred';
 import { noop } from './utils/noop';
 import { parse as parseLinkHeader } from 'http-link-header';
@@ -115,7 +116,7 @@ async function _export({
 
 		const export_file = path.join(export_dir, file);
 		mkdirp(path.dirname(export_file));
-		fs.writeFileSync(export_file, body);
+		fs.writeFileSync(export_file, prettier.format(body, {parser: 'html', useTabs: true}));
 	}
 
 	proc.on('message', message => {
