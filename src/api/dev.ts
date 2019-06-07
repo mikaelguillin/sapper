@@ -28,7 +28,8 @@ type Opts = {
 	hot?: boolean,
 	'devtools-port'?: number,
 	bundler?: 'rollup' | 'webpack',
-	port?: number
+	port?: number,
+	ext: string
 };
 
 export function dev(opts: Opts) {
@@ -47,7 +48,7 @@ class Watcher extends EventEmitter {
 	}
 	port: number;
 	closed: boolean;
-
+	
 	dev_port: number;
 	live: boolean;
 	hot: boolean;
@@ -67,6 +68,7 @@ class Watcher extends EventEmitter {
 		unique_warnings: Set<string>;
 		unique_errors: Set<string>;
 	}
+	ext: string;
 
 	constructor({
 		cwd = '.',
@@ -80,7 +82,8 @@ class Watcher extends EventEmitter {
 		hot,
 		'devtools-port': devtools_port,
 		bundler,
-		port = +process.env.PORT
+		port = +process.env.PORT, 
+		ext
 	}: Opts) {
 		super();
 
@@ -95,7 +98,7 @@ class Watcher extends EventEmitter {
 			output: path.resolve(cwd, output),
 			static: path.resolve(cwd, static_files)
 		};
-
+		this.ext = ext;
 		this.port = port;
 		this.closed = false;
 
@@ -161,7 +164,7 @@ class Watcher extends EventEmitter {
 		let manifest_data: ManifestData;
 
 		try {
-			manifest_data = create_manifest_data(routes);
+			manifest_data = create_manifest_data(routes, this.ext);
 			create_app({
 				bundler: this.bundler,
 				manifest_data,
@@ -189,7 +192,7 @@ class Watcher extends EventEmitter {
 				},
 				() => {
 					try {
-						const new_manifest_data = create_manifest_data(routes);
+						const new_manifest_data = create_manifest_data(routes, this.ext);
 						create_app({
 							bundler: this.bundler,
 							manifest_data, // TODO is this right? not new_manifest_data?
@@ -206,14 +209,18 @@ class Watcher extends EventEmitter {
 						});
 					}
 				}
-			),
-
-			fs.watch(`${src}/template.html`, () => {
-				this.dev_server.send({
-					action: 'reload'
-				});
-			})
+			)
 		);
+
+		if (this.live) {
+			this.filewatchers.push(
+				fs.watch(`${src}/template.html`, () => {
+					this.dev_server.send({
+						action: 'reload'
+					});
+				})
+			);
+		}
 
 		let deferred = new Deferred();
 
@@ -252,7 +259,7 @@ class Watcher extends EventEmitter {
 									this.dev_server.send({
 										status: 'completed'
 									});
-								} else {
+								} else if (this.live) {
 									this.dev_server.send({
 										action: 'reload'
 									});
@@ -267,48 +274,54 @@ class Watcher extends EventEmitter {
 							});
 					};
 
+					const start_server = () => {
+						// we need to give the child process its own DevTools port,
+						// otherwise Node will try to use the parent's (and fail)
+						const debugArgRegex = /--inspect(?:-brk|-port)?|--debug-port/;
+						const execArgv = process.execArgv.slice();
+						if (execArgv.some((arg: string) => !!arg.match(debugArgRegex))) {
+							execArgv.push(`--inspect-port=${this.devtools_port}`);
+						}
+
+						this.proc = child_process.fork(`${dest}/server/server.js`, [], {
+							cwd: process.cwd(),
+							env: Object.assign({
+								PORT: this.port
+							}, process.env),
+							stdio: ['ipc'],
+							execArgv
+						});
+
+						this.proc.stdout.on('data', chunk => {
+							this.emit('stdout', chunk);
+						});
+
+						this.proc.stderr.on('data', chunk => {
+							this.emit('stderr', chunk);
+						});
+
+						this.proc.on('message', message => {
+							if (message.__sapper__ && message.event === 'basepath') {
+								this.emit('basepath', {
+									basepath: message.basepath
+								});
+							}
+						});
+
+						this.proc.on('exit', emitFatal);
+					};
+
 					if (this.proc) {
 						this.proc.removeListener('exit', emitFatal);
 						this.proc.kill();
-						this.proc.on('exit', restart);
+						this.proc.on('exit', () => {
+							start_server();
+							restart();
+						});
 					} else {
+						start_server();
 						restart();
 					}
-
-					// we need to give the child process its own DevTools port,
-					// otherwise Node will try to use the parent's (and fail)
-					const debugArgRegex = /--inspect(?:-brk|-port)?|--debug-port/;
-					const execArgv = process.execArgv.slice();
-					if (execArgv.some((arg: string) => !!arg.match(debugArgRegex))) {
-						execArgv.push(`--inspect-port=${this.devtools_port}`);
-					}
-
-					this.proc = child_process.fork(`${dest}/server/server.js`, [], {
-						cwd: process.cwd(),
-						env: Object.assign({
-							PORT: this.port
-						}, process.env),
-						stdio: ['ipc'],
-						execArgv
-					});
-
-					this.proc.stdout.on('data', chunk => {
-						this.emit('stdout', chunk);
-					});
-
-					this.proc.stderr.on('data', chunk => {
-						this.emit('stderr', chunk);
-					});
-
-					this.proc.on('message', message => {
-						if (message.__sapper__ && message.event === 'basepath') {
-							this.emit('basepath', {
-								basepath: message.basepath
-							});
-						}
-					});
-
-					this.proc.on('exit', emitFatal);
 				});
 			}
 		});
