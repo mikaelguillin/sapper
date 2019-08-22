@@ -1,4 +1,4 @@
-import { writable } from 'svelte/store.mjs';
+import { writable } from 'svelte/store';
 import fs from 'fs';
 import path from 'path';
 import cookie from 'cookie';
@@ -149,6 +149,7 @@ export function get_page_handler(
 		try {
 			const root_preloaded = manifest.root_preload
 				? manifest.root_preload.call(preload_context, {
+					host: req.headers.host,
 					path: req.path,
 					query: req.query,
 					params: {}
@@ -168,6 +169,7 @@ export function get_page_handler(
 
 					return part.preload
 						? part.preload.call(preload_context, {
+							host: req.headers.host,
 							path: req.path,
 							query: req.query,
 							params
@@ -218,6 +220,7 @@ export function get_page_handler(
 				stores: {
 					page: {
 						subscribe: writable({
+							host: req.headers.host,
 							path: req.path,
 							query: req.query,
 							params
